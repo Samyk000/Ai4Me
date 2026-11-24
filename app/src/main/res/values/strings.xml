@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Ai4Me</string>
+    <string name="tagline">Private, Voice-First Offline AI</string>
+    <string name="nav_home">Home</string>
+    <string name="nav_chat">Chat</string>
+    <string name="nav_models">Models</string>
+    <string name="nav_activity">Activity</string>
+    <string name="nav_settings">Settings</string>
+</resources>
