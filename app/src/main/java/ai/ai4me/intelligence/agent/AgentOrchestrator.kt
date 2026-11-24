@@ -23,6 +23,11 @@ data class AgentExecutionState(
     val completedSteps: List<DbTaskStep> = emptyList()
 )
 
+interface AgentTaskRunner {
+    val executionState: StateFlow<AgentExecutionState>
+    suspend fun executeTask(goal: String, llmProvider: LLMProvider): DbTask
+}
+
 /**
  * Bounded Agent Orchestrator & Execution Loop (Document 1 §5.6 & §6, Document 2 §6)
  * Enforces observe-plan-act-observe loop:
@@ -36,10 +41,10 @@ class AgentOrchestrator(
     private val toolAuditDao: ToolAuditDao,
     private val memoryRetriever: MemoryRetriever,
     private val contextBuilder: ContextBuilder = ContextBuilder(),
-    private val tools: Map<String, AgentTool> = emptyMap()
-) {
+    tools: Map<String, AgentTool> = emptyMap()
+) : AgentTaskRunner {
     private val _executionState = MutableStateFlow(AgentExecutionState())
-    val executionState: StateFlow<AgentExecutionState> = _executionState.asStateFlow()
+    override val executionState: StateFlow<AgentExecutionState> = _executionState.asStateFlow()
 
     private val toolRegistry = tools.toMutableMap()
 
@@ -53,7 +58,7 @@ class AgentOrchestrator(
         }
     }
 
-    suspend fun executeTask(
+    override suspend fun executeTask(
         goal: String,
         llmProvider: LLMProvider
     ): DbTask = withContext(Dispatchers.IO) {

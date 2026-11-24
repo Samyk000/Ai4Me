@@ -2,7 +2,6 @@ package ai.ai4me.ui.screens.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,16 +15,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -36,23 +33,26 @@ import ai.ai4me.ui.components.AssistantState
 import ai.ai4me.ui.components.SectionCard
 import ai.ai4me.ui.components.StatusBadge
 import ai.ai4me.ui.theme.Ai4MeTheme
+import ai.ai4me.voice.loop.VoiceConversationCoordinator
 
 /**
  * Home Screen (Document 3 §4.1)
  * Purpose: Central interaction surface, unmistakable assistant state,
- * genuine hardware readiness indicator, and quick actions.
+ * genuine hardware readiness indicator, and live voice loop with barge-in.
  */
 @Composable
 fun HomeScreen(
     hardwareSpec: DeviceHardwareSpec,
     recommendation: HardwareRecommendation,
+    coordinator: VoiceConversationCoordinator,
     onNavigateToChat: () -> Unit,
     onNavigateToModels: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = Ai4MeTheme.colors
     val spacing = Ai4MeTheme.spacing
-    var assistantState by remember { mutableStateOf(AssistantState.IDLE) }
+    val voiceState by coordinator.voiceState.collectAsState()
+    val transcript by coordinator.currentTranscript.collectAsState()
 
     Column(
         modifier = modifier
@@ -92,32 +92,47 @@ fun HomeScreen(
 
         // Functional State Orb (Document 3 §4.1)
         AssistantOrb(
-            state = assistantState,
+            state = voiceState,
             size = 140.dp,
             onClick = {
-                assistantState = when (assistantState) {
-                    AssistantState.IDLE -> AssistantState.LISTENING
-                    AssistantState.LISTENING -> AssistantState.PROCESSING
-                    AssistantState.PROCESSING -> AssistantState.SPEAKING
-                    AssistantState.SPEAKING -> AssistantState.IDLE
-                    AssistantState.ERROR -> AssistantState.IDLE
-                }
+                coordinator.startVoiceSession()
             }
         )
 
         Text(
-            text = assistantState.label,
+            text = when (voiceState) {
+                AssistantState.IDLE -> "Ready (Tap to speak)"
+                AssistantState.LISTENING -> "Listening to you..."
+                AssistantState.PROCESSING -> "Processing locally..."
+                AssistantState.SPEAKING -> "Speaking (Tap to interrupt)"
+                AssistantState.ERROR -> "Voice error (Tap to retry)"
+            },
             style = Ai4MeTheme.typography.title,
             color = colors.textPrimary
         )
 
-        // Mic interaction button (Enforces minimum 48dp touch target)
+        // Live Voice Transcript Card
+        if (transcript.isNotBlank()) {
+            SectionCard(title = "Voice Session") {
+                Text(
+                    text = transcript,
+                    style = Ai4MeTheme.typography.body,
+                    color = colors.textPrimary
+                )
+            }
+        }
+
+        // Voice interaction button (Enforces minimum 48dp touch target)
         Button(
             onClick = {
-                assistantState = if (assistantState == AssistantState.LISTENING) AssistantState.IDLE else AssistantState.LISTENING
+                coordinator.startVoiceSession()
             },
             colors = ButtonDefaults.buttonColors(
-                containerColor = colors.primary,
+                containerColor = when (voiceState) {
+                    AssistantState.LISTENING -> colors.error
+                    AssistantState.SPEAKING -> colors.warning
+                    else -> colors.primary
+                },
                 contentColor = colors.onPrimary
             ),
             shape = Ai4MeTheme.shapes.sm,
@@ -126,12 +141,16 @@ fun HomeScreen(
                 .heightIn(min = spacing.minTouchTarget)
         ) {
             Icon(
-                imageVector = Icons.Default.Mic,
-                contentDescription = "Voice Input",
+                imageVector = if (voiceState == AssistantState.LISTENING || voiceState == AssistantState.SPEAKING) Icons.Default.Stop else Icons.Default.Mic,
+                contentDescription = "Voice Control",
                 modifier = Modifier.size(20.dp)
             )
             Text(
-                text = if (assistantState == AssistantState.LISTENING) "Stop Listening" else "Hold or Tap to Speak",
+                text = when (voiceState) {
+                    AssistantState.LISTENING -> "Stop Listening"
+                    AssistantState.SPEAKING -> "Interrupt Assistant (Barge-in)"
+                    else -> "Tap to Speak"
+                },
                 style = Ai4MeTheme.typography.label,
                 modifier = Modifier.padding(start = spacing.sm)
             )
@@ -166,21 +185,6 @@ fun HomeScreen(
             Text(
                 text = recommendation.reasoning,
                 style = Ai4MeTheme.typography.body,
-                color = colors.textSecondary
-            )
-        }
-
-        // Recent Task Summary Card (Document 3 §4.1)
-        SectionCard(title = "Recent Activity") {
-            Text(
-                text = "No recent tasks executed.",
-                style = Ai4MeTheme.typography.body,
-                color = colors.textMuted
-            )
-            Spacer(modifier = Modifier.height(spacing.xs))
-            Text(
-                text = "When tasks are executed (e.g. notifications, calendar, messaging), observable verification steps will appear here.",
-                style = Ai4MeTheme.typography.caption,
                 color = colors.textSecondary
             )
         }

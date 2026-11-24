@@ -21,8 +21,14 @@ import ai.ai4me.intelligence.llm.ModelRuntimeManager
 import ai.ai4me.intelligence.memory.MemoryRetriever
 import ai.ai4me.ui.navigation.Ai4MeNavHost
 import ai.ai4me.ui.theme.Ai4MeTheme
+import ai.ai4me.voice.focus.AudioFocusController
+import ai.ai4me.voice.loop.VoiceConversationCoordinator
+import ai.ai4me.voice.stt.LocalSpeechRecognizer
+import ai.ai4me.voice.tts.LocalTextToSpeechEngine
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var voiceCoordinator: VoiceConversationCoordinator
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +61,21 @@ class MainActivity : ComponentActivity() {
             registerTool(ReadNotificationsTool())
         }
 
+        // Voice Engine & Interruption Loop (Document 1 §3.2 & Document 2 §8)
+        val sttProvider = LocalSpeechRecognizer(applicationContext)
+        val ttsProvider = LocalTextToSpeechEngine(applicationContext)
+        val audioFocusController = AudioFocusController(applicationContext) {
+            voiceCoordinator.stopVoiceSession()
+        }
+
+        voiceCoordinator = VoiceConversationCoordinator(
+            sttProvider = sttProvider,
+            ttsProvider = ttsProvider,
+            audioFocusController = audioFocusController,
+            runtimeManager = runtimeManager,
+            orchestrator = orchestrator
+        )
+
         setContent {
             Ai4MeTheme {
                 Ai4MeNavHost(
@@ -64,9 +85,15 @@ class MainActivity : ComponentActivity() {
                     downloadManager = downloadManager,
                     runtimeManager = runtimeManager,
                     orchestrator = orchestrator,
-                    taskDao = taskDao
+                    taskDao = taskDao,
+                    voiceCoordinator = voiceCoordinator
                 )
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        voiceCoordinator.stopVoiceSession()
     }
 }

@@ -32,6 +32,7 @@ import ai.ai4me.ui.screens.home.HomeScreen
 import ai.ai4me.ui.screens.models.ModelsScreen
 import ai.ai4me.ui.screens.settings.SettingsScreen
 import ai.ai4me.ui.theme.Ai4MeTheme
+import ai.ai4me.voice.loop.VoiceConversationCoordinator
 
 /**
  * Top-Level App Navigation Scaffold (Document 3 §3)
@@ -46,6 +47,7 @@ fun Ai4MeNavHost(
     runtimeManager: ModelRuntimeManager,
     orchestrator: AgentOrchestrator,
     taskDao: TaskDao,
+    voiceCoordinator: VoiceConversationCoordinator,
     navController: NavHostController = rememberNavController(),
     modifier: Modifier = Modifier
 ) {
@@ -111,6 +113,7 @@ fun Ai4MeNavHost(
                 HomeScreen(
                     hardwareSpec = hardwareSpec,
                     recommendation = recommendation,
+                    coordinator = voiceCoordinator,
                     onNavigateToChat = {
                         navController.navigate(NavDestination.CHAT.route)
                     },
