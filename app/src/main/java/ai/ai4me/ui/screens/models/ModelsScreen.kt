@@ -50,7 +50,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import ai.ai4me.data.models.DownloadProgress
+import ai.ai4me.hardware.benchmark.BenchmarkMetrics
+import ai.ai4me.hardware.benchmark.HardwareBenchmarkRunner
 import ai.ai4me.data.models.DownloadState
 import ai.ai4me.data.models.FeaturedModel
 import ai.ai4me.data.models.HuggingFaceModelSummary
@@ -81,7 +86,7 @@ fun ModelsScreen(
     val colors = Ai4MeTheme.colors
     val spacing = Ai4MeTheme.spacing
     var selectedTabIndex by remember { mutableIntStateOf(0) }
-    val tabs = listOf("Featured", "Browse HF", "Downloads", "Installed")
+    val tabs = listOf("Featured", "Browse HF", "Downloads", "Installed", "Benchmark")
 
     Column(
         modifier = modifier
@@ -153,6 +158,9 @@ fun ModelsScreen(
                 )
                 3 -> InstalledTab(
                     downloadManager = downloadManager,
+                    runtimeManager = runtimeManager
+                )
+                4 -> BenchmarkTab(
                     runtimeManager = runtimeManager
                 )
             }
@@ -634,5 +642,91 @@ private fun InstalledTab(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BenchmarkTab(
+    runtimeManager: ModelRuntimeManager
+) {
+    val colors = Ai4MeTheme.colors
+    val spacing = Ai4MeTheme.spacing
+    val scope = rememberCoroutineScope()
+    val runner = remember { HardwareBenchmarkRunner() }
+    var isRunning by remember { mutableStateOf(false) }
+    var metrics by remember { mutableStateOf<BenchmarkMetrics?>(null) }
+    val activeState by runtimeManager.runtimeState.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(spacing.md)
+    ) {
+        SectionCard(title = "Hardware Performance Benchmark") {
+            Text(
+                text = "Measures on-device generation throughput (tokens/sec), prompt processing speed, memory footprint, and thermal status under local load.",
+                style = Ai4MeTheme.typography.body,
+                color = colors.textSecondary
+            )
+
+            Spacer(modifier = Modifier.height(spacing.sm))
+
+            Button(
+                onClick = {
+                    scope.launch {
+                        isRunning = true
+                        val activeName = runtimeManager.loadedModelFile?.name ?: "Local-Hardware-Engine"
+                        metrics = runner.runBenchmark(activeName, runtimeManager)
+                        isRunning = false
+                    }
+                },
+                enabled = !isRunning,
+                colors = ButtonDefaults.buttonColors(containerColor = colors.primary)
+            ) {
+                if (isRunning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = colors.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(spacing.xs))
+                    Text("Running Benchmark...", color = colors.onPrimary)
+                } else {
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, tint = colors.onPrimary)
+                    Spacer(modifier = Modifier.width(spacing.xs))
+                    Text("Run Benchmark", color = colors.onPrimary)
+                }
+            }
+        }
+
+        metrics?.let { m ->
+            SectionCard(title = "Benchmark Results: ${m.modelName}") {
+                MetricItem(label = "Generation Throughput", value = "${m.tokensPerSecond} tokens/sec")
+                MetricItem(label = "Prompt Processing Speed", value = "${m.promptTokensPerSecond} tokens/sec")
+                MetricItem(label = "Time To First Token (TTFT)", value = "${m.timeToFirstTokenMs} ms")
+                MetricItem(label = "Peak Memory Footprint", value = "${m.peakMemoryMb} MB")
+                MetricItem(label = "Steady-State Memory", value = "${m.steadyStateMemoryMb} MB")
+                MetricItem(label = "Thermal Status", value = m.thermalState)
+                MetricItem(label = "STT Chunk Latency", value = "${m.sttLatencyMs} ms")
+                MetricItem(label = "TTS Synthesis Latency", value = "${m.ttsLatencyMs} ms")
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricItem(label: String, value: String) {
+    val colors = Ai4MeTheme.colors
+    val spacing = Ai4MeTheme.spacing
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = spacing.xxs),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, style = Ai4MeTheme.typography.caption, color = colors.textSecondary)
+        Text(text = value, style = Ai4MeTheme.typography.label, color = colors.primary)
     }
 }
