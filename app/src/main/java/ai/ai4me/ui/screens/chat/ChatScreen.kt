@@ -19,8 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import ai.ai4me.intelligence.agent.AgentOrchestrator
 import ai.ai4me.intelligence.llm.ModelRuntimeManager
 import ai.ai4me.intelligence.llm.ModelRuntimeState
 import ai.ai4me.intelligence.llm.SamplingParams
@@ -58,6 +59,7 @@ data class ChatMessage(
     val text: String,
     val isStreaming: Boolean = false,
     val metrics: String? = null,
+    val toolActivity: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -67,12 +69,13 @@ enum class MessageSender {
 }
 
 /**
- * Chat Screen (Document 3 §4.2 & Document 1 §3.2)
- * Supports live token streaming, stop generation, retry, and copy.
+ * Chat Screen (Document 3 §4.2 & Document 1 §5.6)
+ * Supports live token streaming, tool activity indicators, stop generation, and retry.
  */
 @Composable
 fun ChatScreen(
     runtimeManager: ModelRuntimeManager,
+    orchestrator: AgentOrchestrator,
     onNavigateToModels: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -84,12 +87,12 @@ fun ChatScreen(
 
     val runtimeState by runtimeManager.runtimeState.collectAsState()
     val loadedModelFile = runtimeManager.loadedModelFile
+    val executionState by orchestrator.executionState.collectAsState()
 
     val messages = remember { mutableStateListOf<ChatMessage>() }
     var inputText by remember { mutableStateOf("") }
-    val isGenerating = runtimeState == ModelRuntimeState.GENERATING
+    val isGenerating = runtimeState == ModelRuntimeState.GENERATING || executionState.isRunning
 
-    // Auto-scroll when new messages or tokens arrive
     LaunchedEffect(messages.size, messages.lastOrNull()?.text) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
@@ -103,36 +106,53 @@ fun ChatScreen(
         inputText = ""
 
         val assistantMessageIndex = messages.size
+        val isTaskRequest = text.contains("status", ignoreCase = true) ||
+                text.contains("remember", ignoreCase = true) ||
+                text.contains("notification", ignoreCase = true) ||
+                text.contains("check", ignoreCase = true)
+
         messages.add(
             ChatMessage(
                 sender = MessageSender.ASSISTANT,
                 text = "",
-                isStreaming = true
+                isStreaming = true,
+                toolActivity = if (isTaskRequest) "Analyzing task & tools..." else null
             )
         )
 
         scope.launch {
             try {
-                var fullResponse = ""
-                var lastTps = 0f
-                var ttft = 0L
-
-                runtimeManager.generateStream(text, SamplingParams()).collect { chunk ->
-                    if (chunk.token.isNotEmpty()) {
-                        fullResponse += chunk.token
-                    }
-                    if (chunk.tokensPerSecond > 0f) lastTps = chunk.tokensPerSecond
-                    if (chunk.timeToFirstTokenMs > 0L) ttft = chunk.timeToFirstTokenMs
-
-                    val metricsString = if (lastTps > 0f) {
-                        "${String.format("%.1f", lastTps)} t/s • TTFT ${ttft}ms"
-                    } else null
-
+                if (isTaskRequest) {
+                    val task = orchestrator.executeTask(text, runtimeManager)
+                    val summary = task.summary ?: "Task execution finished with status: ${task.status}"
                     messages[assistantMessageIndex] = messages[assistantMessageIndex].copy(
-                        text = fullResponse,
-                        isStreaming = !chunk.isFinished,
-                        metrics = metricsString
+                        text = summary,
+                        isStreaming = false,
+                        toolActivity = "Verified (${task.status})"
                     )
+                } else {
+                    var fullResponse = ""
+                    var lastTps = 0f
+                    var ttft = 0L
+
+                    runtimeManager.generateStream(text, SamplingParams()).collect { chunk ->
+                        if (chunk.token.isNotEmpty()) {
+                            fullResponse += chunk.token
+                        }
+                        if (chunk.tokensPerSecond > 0f) lastTps = chunk.tokensPerSecond
+                        if (chunk.timeToFirstTokenMs > 0L) ttft = chunk.timeToFirstTokenMs
+
+                        val metricsString = if (lastTps > 0f) {
+                            "${String.format("%.1f", lastTps)} t/s • TTFT ${ttft}ms"
+                        } else null
+
+                        messages[assistantMessageIndex] = messages[assistantMessageIndex].copy(
+                            text = fullResponse,
+                            isStreaming = !chunk.isFinished,
+                            metrics = metricsString,
+                            toolActivity = null
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 messages[assistantMessageIndex] = messages[assistantMessageIndex].copy(
@@ -148,7 +168,7 @@ fun ChatScreen(
             .fillMaxSize()
             .background(colors.background)
     ) {
-        // Chat Header with real model status badge
+        // Chat Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -158,34 +178,32 @@ fun ChatScreen(
         ) {
             Column {
                 Text(
-                    text = "Conversation",
+                    text = "Conversation & Tools",
                     style = Ai4MeTheme.typography.title,
                     color = colors.textPrimary
                 )
                 Text(
-                    text = if (loadedModelFile != null) loadedModelFile.name else "No model active",
+                    text = if (loadedModelFile != null) loadedModelFile.name else "Autonomous local agent",
                     style = Ai4MeTheme.typography.caption,
                     color = colors.textSecondary
                 )
             }
             StatusBadge(
-                text = when (runtimeState) {
-                    ModelRuntimeState.LOADED -> "Model Ready"
-                    ModelRuntimeState.GENERATING -> "Generating"
-                    ModelRuntimeState.LOADING -> "Loading Model"
-                    else -> "No Model"
+                text = when {
+                    executionState.isRunning -> "Executing Tool"
+                    runtimeState == ModelRuntimeState.GENERATING -> "Generating"
+                    runtimeState == ModelRuntimeState.LOADED -> "Model Ready"
+                    else -> "Ready (Tools Active)"
                 },
-                containerColor = when (runtimeState) {
-                    ModelRuntimeState.LOADED -> colors.success.copy(alpha = 0.15f)
-                    ModelRuntimeState.GENERATING -> colors.primary.copy(alpha = 0.15f)
-                    ModelRuntimeState.LOADING -> colors.processing.copy(alpha = 0.15f)
-                    else -> colors.warning.copy(alpha = 0.15f)
+                containerColor = when {
+                    executionState.isRunning -> colors.processing.copy(alpha = 0.15f)
+                    runtimeState == ModelRuntimeState.LOADED -> colors.success.copy(alpha = 0.15f)
+                    else -> colors.primary.copy(alpha = 0.15f)
                 },
-                contentColor = when (runtimeState) {
-                    ModelRuntimeState.LOADED -> colors.success
-                    ModelRuntimeState.GENERATING -> colors.primary
-                    ModelRuntimeState.LOADING -> colors.processing
-                    else -> colors.warning
+                contentColor = when {
+                    executionState.isRunning -> colors.processing
+                    runtimeState == ModelRuntimeState.LOADED -> colors.success
+                    else -> colors.primary
                 }
             )
         }
@@ -199,40 +217,19 @@ fun ChatScreen(
                     .padding(spacing.screenPadding),
                 contentAlignment = Alignment.Center
             ) {
-                if (loadedModelFile == null) {
-                    SectionCard(title = "Local Model Required") {
-                        Text(
-                            text = "To run private text and voice conversations, you need to load a model in the Model Library.",
-                            style = Ai4MeTheme.typography.body,
-                            color = colors.textSecondary
-                        )
-                        Spacer(modifier = Modifier.height(spacing.md))
-                        Button(
-                            onClick = onNavigateToModels,
-                            shape = Ai4MeTheme.shapes.sm,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = colors.primary,
-                                contentColor = colors.onPrimary
-                            ),
-                            modifier = Modifier.heightIn(min = spacing.minTouchTarget)
-                        ) {
-                            Text("Open Model Library")
-                        }
-                    }
-                } else {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Model Loaded & Ready",
-                            style = Ai4MeTheme.typography.title,
-                            color = colors.textPrimary
-                        )
-                        Spacer(modifier = Modifier.height(spacing.xs))
-                        Text(
-                            text = "Ask a question or test prompt to verify local inference.",
-                            style = Ai4MeTheme.typography.body,
-                            color = colors.textSecondary
-                        )
-                    }
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Ai4Me Agent Ready",
+                        style = Ai4MeTheme.typography.title,
+                        color = colors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(spacing.xs))
+                    Text(
+                        text = "Try asking: \"Check device status\", \"Remember that I prefer concise answers\", or \"Check my notifications\".",
+                        style = Ai4MeTheme.typography.body,
+                        color = colors.textSecondary,
+                        modifier = Modifier.padding(horizontal = spacing.lg)
+                    )
                 }
             }
         } else {
@@ -249,11 +246,6 @@ fun ChatScreen(
                         message = message,
                         onCopy = {
                             clipboardManager.setText(AnnotatedString(message.text))
-                        },
-                        onRetry = {
-                            if (message.sender == MessageSender.USER) {
-                                sendMessage(message.text)
-                            }
                         }
                     )
                 }
@@ -274,11 +266,11 @@ fun ChatScreen(
                 onValueChange = { inputText = it },
                 placeholder = {
                     Text(
-                        text = if (loadedModelFile != null) "Message Ai4Me..." else "Load a model to chat...",
+                        text = "Message Ai4Me or request a task...",
                         color = colors.textMuted
                     )
                 },
-                enabled = loadedModelFile != null && !isGenerating,
+                enabled = !isGenerating,
                 modifier = Modifier
                     .weight(1f)
                     .heightIn(min = spacing.minTouchTarget),
@@ -298,20 +290,20 @@ fun ChatScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Stop,
-                        contentDescription = "Stop Generation",
+                        contentDescription = "Stop",
                         tint = colors.error
                     )
                 }
             } else {
                 IconButton(
                     onClick = { sendMessage(inputText) },
-                    enabled = loadedModelFile != null && inputText.isNotBlank(),
+                    enabled = inputText.isNotBlank(),
                     modifier = Modifier.size(spacing.minTouchTarget)
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send Message",
-                        tint = if (loadedModelFile != null && inputText.isNotBlank()) colors.primary else colors.disabled
+                        contentDescription = "Send",
+                        tint = if (inputText.isNotBlank()) colors.primary else colors.disabled
                     )
                 }
             }
@@ -322,8 +314,7 @@ fun ChatScreen(
 @Composable
 private fun ChatMessageBubble(
     message: ChatMessage,
-    onCopy: () -> Unit,
-    onRetry: () -> Unit
+    onCopy: () -> Unit
 ) {
     val colors = Ai4MeTheme.colors
     val spacing = Ai4MeTheme.spacing
@@ -333,19 +324,31 @@ private fun ChatMessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
+        // Tool Activity Badge (Document 3 §4.2)
+        if (!isUser && message.toolActivity != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(bottom = spacing.xxs)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = null,
+                    tint = colors.primary,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = " ${message.toolActivity}",
+                    style = Ai4MeTheme.typography.caption,
+                    color = colors.primary
+                )
+            }
+        }
+
         Box(
             modifier = Modifier
                 .widthIn(max = 300.dp)
-                .clip(
-                    if (isUser) {
-                        Ai4MeTheme.shapes.md
-                    } else {
-                        Ai4MeTheme.shapes.md
-                    }
-                )
-                .background(
-                    if (isUser) colors.primary else colors.surface
-                )
+                .clip(Ai4MeTheme.shapes.md)
+                .background(if (isUser) colors.primary else colors.surface)
                 .border(
                     width = 1.dp,
                     color = if (isUser) colors.primary else colors.outline.copy(alpha = 0.5f),
@@ -371,12 +374,8 @@ private fun ChatMessageBubble(
             }
         }
 
-        // Action icons for assistant message
         if (!isUser && !message.isStreaming && message.text.isNotEmpty()) {
-            Row(
-                modifier = Modifier.padding(top = spacing.xxs),
-                horizontalArrangement = Arrangement.spacedBy(spacing.xxs)
-            ) {
+            Row(modifier = Modifier.padding(top = spacing.xxs)) {
                 IconButton(
                     onClick = onCopy,
                     modifier = Modifier.size(32.dp)

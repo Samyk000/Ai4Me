@@ -19,10 +19,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import ai.ai4me.data.db.TaskDao
 import ai.ai4me.data.models.ModelCatalogRepository
 import ai.ai4me.data.models.ModelDownloadManager
 import ai.ai4me.hardware.DeviceHardwareSpec
 import ai.ai4me.hardware.HardwareRecommendation
+import ai.ai4me.intelligence.agent.AgentOrchestrator
 import ai.ai4me.intelligence.llm.ModelRuntimeManager
 import ai.ai4me.ui.screens.activity.ActivityScreen
 import ai.ai4me.ui.screens.chat.ChatScreen
@@ -42,6 +44,8 @@ fun Ai4MeNavHost(
     catalogRepository: ModelCatalogRepository,
     downloadManager: ModelDownloadManager,
     runtimeManager: ModelRuntimeManager,
+    orchestrator: AgentOrchestrator,
+    taskDao: TaskDao,
     navController: NavHostController = rememberNavController(),
     modifier: Modifier = Modifier
 ) {
@@ -118,6 +122,7 @@ fun Ai4MeNavHost(
             composable(NavDestination.CHAT.route) {
                 ChatScreen(
                     runtimeManager = runtimeManager,
+                    orchestrator = orchestrator,
                     onNavigateToModels = {
                         navController.navigate(NavDestination.MODELS.route)
                     }
@@ -132,7 +137,10 @@ fun Ai4MeNavHost(
                 )
             }
             composable(NavDestination.ACTIVITY.route) {
-                ActivityScreen()
+                ActivityScreen(
+                    taskDao = taskDao,
+                    orchestrator = orchestrator
+                )
             }
             composable(NavDestination.SETTINGS.route) {
                 SettingsScreen(
