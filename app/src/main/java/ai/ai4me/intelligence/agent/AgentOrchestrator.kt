@@ -172,7 +172,7 @@ class AgentOrchestrator(
             }
 
             val stepEndTime = System.currentTimeMillis()
-            val stepStatus = if (result.success) "completed" else "failed"
+            val stepStatus = result.status
 
             taskDao.updateTaskStep(
                 id = stepId,
@@ -209,8 +209,15 @@ class AgentOrchestrator(
             )
             observations.add(wrappedObservation)
 
-            // Loop safety: Stop repeating the same failing action
-            if (!result.success) {
+            // Outcome & Loop safety check (Document 1 §3.4 & §6)
+            if (result.status == "needs_user_input") {
+                finalStatus = "needs_user_input"
+                finalSummary = result.errorMessage ?: "User input required"
+                break
+            } else if (result.status == "unverified") {
+                finalStatus = "unverified"
+                finalSummary = result.verificationEvidence
+            } else if (!result.success) {
                 if (lastFailingTool == toolName) {
                     loopFailedRepeatCount++
                     if (loopFailedRepeatCount >= 2) {
@@ -250,7 +257,7 @@ class AgentOrchestrator(
     ): Pair<String, String>? {
         val lowerGoal = goal.lowercase()
 
-        // Step 1: Query necessary system or memory state
+        // Step 1: Query necessary system or memory state or execute single-step automation
         if (stepIndex == 1) {
             return when {
                 lowerGoal.contains("status") || lowerGoal.contains("telemetry") || lowerGoal.contains("headroom") ->
@@ -259,6 +266,15 @@ class AgentOrchestrator(
                     Pair("search_memory", "{\"query\":\"preference\"}")
                 lowerGoal.contains("notification") ->
                     Pair("read_notifications", "{}")
+                lowerGoal.contains("tell ") || lowerGoal.contains("message ") || lowerGoal.contains("sms") || lowerGoal.contains("text ") -> {
+                    val contactName = extractRecipientName(goal)
+                    val messageText = extractMessageBody(goal)
+                    Pair("send_sms", """{"recipientName":"$contactName","message":"$messageText"}""")
+                }
+                lowerGoal.contains("open ") || lowerGoal.contains("launch ") -> {
+                    val appName = goal.replaceFirst("(?i)open\\s+|launch\\s+".toRegex(), "").trim()
+                    Pair("launch_app", """{"appName":"$appName"}""")
+                }
                 else ->
                     Pair("get_device_telemetry", "{}")
             }
@@ -273,5 +289,17 @@ class AgentOrchestrator(
 
         // Plan concluded
         return null
+    }
+
+    private fun extractRecipientName(goal: String): String {
+        val pattern = "(?i)(?:tell|message|text|sms)\\s+([a-zA-Z0-9]+)".toRegex()
+        val match = pattern.find(goal)
+        return match?.groupValues?.get(1) ?: "Contact"
+    }
+
+    private fun extractMessageBody(goal: String): String {
+        val pattern = "(?i)(?:tell|message|text|sms)\\s+[a-zA-Z0-9]+\\s+(.*)".toRegex()
+        val match = pattern.find(goal)
+        return match?.groupValues?.get(1)?.trim() ?: goal
     }
 }

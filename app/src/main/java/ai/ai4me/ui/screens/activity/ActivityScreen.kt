@@ -164,12 +164,14 @@ private fun TaskHistoryCard(
                     "completed" -> colors.success.copy(alpha = 0.15f)
                     "failed" -> colors.error.copy(alpha = 0.15f)
                     "needs_user_input" -> colors.warning.copy(alpha = 0.15f)
+                    "unverified" -> colors.warning.copy(alpha = 0.15f)
                     else -> colors.primary.copy(alpha = 0.15f)
                 },
                 contentColor = when (task.status) {
                     "completed" -> colors.success
                     "failed" -> colors.error
                     "needs_user_input" -> colors.warning
+                    "unverified" -> colors.warning
                     else -> colors.primary
                 }
             )

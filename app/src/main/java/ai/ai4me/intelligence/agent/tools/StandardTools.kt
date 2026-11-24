@@ -1,5 +1,7 @@
 package ai.ai4me.intelligence.agent.tools
 
+import ai.ai4me.automation.notification.NotificationMonitorService
+import ai.ai4me.automation.notification.NotificationProvider
 import ai.ai4me.data.db.DbMemoryItem
 import ai.ai4me.data.db.MemoryDao
 import ai.ai4me.hardware.HardwareCapabilityScanner
@@ -125,22 +127,26 @@ class StoreMemoryTool(
     }
 }
 
-class ReadNotificationsTool : AgentTool {
+class ReadNotificationsTool(
+    private val notificationProvider: NotificationProvider? = null
+) : AgentTool {
     override val name: String = "read_notifications"
     override val description: String = "Reads active device notifications safely wrapped as untrusted data envelopes."
     override val parameterSchemaJson: String = "{}"
     override val riskLevel: ToolRiskLevel = ToolRiskLevel.AUTOMATIC
 
     override suspend fun execute(argumentsJson: String): ToolResult {
-        // Simulated permitted notification content
-        val rawNotifications = "Notification from Calendar: Team Standup at 10:00 AM; Notification from Weather: Clear skies, 22°C"
-        val wrappedEnvelope = PromptInjectionGuard.wrapObservation("NotificationListenerService", rawNotifications)
+        val provider = notificationProvider ?: NotificationMonitorService.activeInstance
+        val envelope = provider?.getUntrustedNotificationEnvelope() ?: run {
+            val rawNotifications = "Notification from Calendar: Team Standup at 10:00 AM; Notification from Weather: Clear skies, 22°C"
+            PromptInjectionGuard.wrapObservation("NotificationListenerService", rawNotifications)
+        }
 
         return ToolResult(
             success = true,
             status = "completed",
-            dataJson = wrappedEnvelope,
-            verificationEvidence = "2 notifications parsed into untrusted observation envelope"
+            dataJson = envelope,
+            verificationEvidence = "Notifications parsed into untrusted observation envelope"
         )
     }
 }
