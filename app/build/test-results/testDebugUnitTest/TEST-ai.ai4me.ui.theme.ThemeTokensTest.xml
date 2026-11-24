@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="ai.ai4me.ui.theme.ThemeTokensTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-11-24T00:38:28.508Z" hostname="MNNNNN0" time="0.024">
-  <properties/>
-  <testcase name="testColorTokens_SemanticContrastGuarantees" classname="ai.ai4me.ui.theme.ThemeTokensTest" time="0.023"/>
-  <testcase name="testSpacing_CompliesWith4dpBaseAndAccessibility" classname="ai.ai4me.ui.theme.ThemeTokensTest" time="0.001"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>
